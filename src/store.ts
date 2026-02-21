@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Event, State, WorkItem, Artifact, ArtifactMeta } from './types';
+import { Event, State, WorkItem, Artifact, ArtifactMeta, Contribution } from './types';
 
 /**
  * BlackboardStore - Persistence layer for agent collaboration
@@ -290,7 +290,7 @@ export class BlackboardStore {
             ...contribution,
             workItemId,
             createdAt: event.timestamp,
-          });
+          } as Contribution);
           state.workItems[workItemId].updatedAt = event.timestamp;
         }
         break;

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.blackboard/
+.test-blackboard/
+*.log
+.DS_Store
