@@ -1,259 +1,61 @@
-## Agent Whiteboard
+# Agent Whiteboard
 
-Shared messaging space for multiple agents to collaborate 
+Shared messaging space for multiple agents to collaborate.
 
-## Rough Outline
+## Persistence Layer
 
+The Blackboard store provides durable storage for agent collaboration:
 
-Below is a first-principles design for an **agent collaboration layer** that avoids chat-room chaos, minimizes context waste, and produces convergent artifacts (plans, specs, priorities). This is not “group chat.” It is **asynchronous, artifact-centric coordination** with explicit turn-taking and incentives to stay silent unless value-add is provable.
+- **Append-only event log** (`events.jsonl`) - All state changes recorded as events
+- **Materialized state** (`state.json`) - Fast-read snapshot derived from events
+- **Versioned artifacts** - Specs and outputs with full history
+- **Work item folders** - Per-item storage for related files
 
----
+## Usage
 
-## 1. Reframe the problem
+```typescript
+import { BlackboardStore } from './store';
 
-### What you do *not* want
+const store = new BlackboardStore('.blackboard');
 
-* N agents subscribed to a firehose
-* Everyone reacting to everything
-* Token burn from rereading history
-* “Discussion” without convergence
+// Log an event
+store.appendEvent({
+  type: 'WorkItemCreated',
+  payload: { id: 'sprint-1', goal: 'Build feature X', owner: 'orchestrator' }
+});
 
-### What you actually want
+// Get current state
+const state = store.getState();
 
-* **A shared workspace, not shared attention**
-* Agents contribute **selectively**, not reflexively
-* Outputs collapse into **artifacts** (plans, specs, decisions)
-* Clear ownership at every step
+// Save an artifact
+store.saveArtifact('spec', 1, '# Spec\n...', {
+  id: 'spec-v1',
+  derivedFrom: ['c-001'],
+  editor: 'architect',
+  status: 'draft'
+});
 
-So: stop thinking “messaging system,” think **blackboard + protocol**.
-
----
-
-## 2. Core abstraction: the Blackboard
-
-A **blackboard** is a persistent, append-only (or versioned) workspace where agents post *structured contributions*, not messages.
-
-This can be:
-
-* A single JSONL / Markdown file
-* A folder of typed documents
-* A lightweight KV store
-
-**Key principle**:
-
-> Agents do not talk to each other. They read and write *artifacts*.
-
----
-
-## 3. The minimum viable data model
-
-### 3.1 Work Item (root object)
-
-```yaml
-work_item:
-  id: sprint-2026-02-w1
-  goal: "Define v1 product spec for X"
-  stage: discovery | synthesis | decision | execution
-  owner: orchestrator
-  constraints:
-    token_budget: 50k
-    deadline: 2026-02-23
+// Compact events into state
+store.compact();
 ```
 
-This is the *only* thing everyone shares by default.
+## Directory Structure
 
----
-
-### 3.2 Contributions (typed, scoped)
-
-Each agent may append **zero or more** contributions.
-
-```yaml
-contribution:
-  id: c-042
-  work_item: sprint-2026-02-w1
-  agent: backend-architect
-  type: risk | proposal | critique | decomposition | unknowns
-  scope: narrow | broad
-  confidence: 0.7
-  payload: |
-    The core risk is X. If Y, system fails at Z.
+```
+.blackboard/
+├── events.jsonl           # Append-only event log
+├── state.json             # Materialized snapshot
+├── artifacts/
+│   ├── spec-v1.md
+│   ├── spec-v1.meta.json
+│   └── arch-v1.md
+└── work_items/
+    └── sprint-1/
 ```
 
-**Rules**
+## Installation
 
-* Contributions are **typed**
-* No free-form replies
-* No agent sees contributions unless explicitly pulled
-
----
-
-### 3.3 Artifacts (the only thing that matters)
-
-Artifacts are **compiled outputs**, not discussions.
-
-```yaml
-artifact:
-  id: spec-v1
-  derived_from:
-    - c-042
-    - c-017
-  editor: product-spec-agent
-  status: draft | reviewed | frozen
-  content: |
-    ## Overview
-    ...
+```bash
+npm install
+npm run build
 ```
-
-Artifacts are the convergence mechanism.
-
----
-
-## 4. Control plane: who speaks, when, and why
-
-### 4.1 Silent by default
-
-Agents **do nothing** unless one of these is true:
-
-1. They are explicitly invoked
-2. They detect a gap they are uniquely qualified to fill
-3. They are asked to review an artifact
-
-No subscriptions. No “listening.”
-
----
-
-### 4.2 Explicit invocation contracts
-
-Instead of:
-
-> “All agents, discuss priorities”
-
-You issue:
-
-```yaml
-task:
-  target_agents:
-    - infra
-    - security
-  ask: "Identify risks in proposed architecture"
-  expected_output: contribution.type = risk
-  max_contributions: 1
-```
-
-This caps noise **by construction**.
-
----
-
-## 5. Scheduling model (this is where it stops being chat)
-
-Use **phases**, not conversation.
-
-### Phase 1 — Divergence (parallel, bounded)
-
-* Many agents write contributions
-* No one reads others yet
-* Hard caps per agent
-
-### Phase 2 — Synthesis (single writer)
-
-* One agent reads all contributions
-* Produces a draft artifact
-
-### Phase 3 — Review (selective)
-
-* 1–3 agents critique the artifact
-* No new ideas allowed
-
-### Phase 4 — Freeze
-
-* Artifact is final
-* Context resets
-
-This mirrors how senior teams actually work.
-
----
-
-## 6. Preventing “everyone responds to everything”
-
-Mechanisms that actually work:
-
-### 6.1 Pull, not push
-
-Agents:
-
-* Cannot see updates unless asked
-* Are given **summaries**, not raw logs
-
-### 6.2 Contribution budgets
-
-Per work item:
-
-```yaml
-agent_limits:
-  backend-architect: 2 contributions
-  ux: 1 contribution
-```
-
-Scarcity improves signal.
-
----
-
-### 6.3 Confidence gating
-
-Low-confidence contributions can be ignored by synthesis agents unless corroborated.
-
----
-
-## 7. Telegram / UI integration (optional, not core)
-
-Telegram should be:
-
-* A **control console**
-* Not the workspace
-
-Example:
-
-* You issue: `/start sprint-2026-02-w1`
-* You inspect artifacts
-* You approve phase transitions
-
-Agents never “chat” in Telegram.
-
----
-
-## 8. Where this ends (and should end)
-
-This system should **not** become:
-
-* A simulation of human conversation
-* A permanent memory blob
-* A debating society
-
-It should end with:
-
-* Frozen artifacts
-* Clear decisions
-* Reset context
-
-If agents keep talking after the artifact is frozen, the system is failing.
-
----
-
-## 9. Mental model to keep you honest
-
-> **Agents are functions, not people.**
-> They transform inputs → outputs.
-> Conversation is a leaky abstraction.
-
-If you design for artifacts, phases, and ownership, collaboration emerges *without* messaging overhead.
-
----
-
-If you want next steps, the natural continuation is:
-
-* A concrete filesystem layout
-* A minimal orchestration loop
-* A strict schema for contributions/artifacts
-
-But the conceptual boundary is here.
